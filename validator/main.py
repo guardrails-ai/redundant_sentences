@@ -1,9 +1,6 @@
-import re
-import string
 from typing import Any, Callable, Dict, Optional
 
-import rstr
-
+from guardrails.utils.docs_utils import sentence_split
 from guardrails.validator_base import (
     FailResult,
     PassResult,
@@ -13,59 +10,76 @@ from guardrails.validator_base import (
 )
 
 
-@register_validator(name="guardrails/regex_match", data_type="string")
-class RegexMatch(Validator):
-    """Validates that a value matches a regular expression.
+@register_validator(name="guardrails/redundant-sentences", data_type="string")
+class RedundantSentences(Validator):
+    """Removes redundant sentences from a string.
+
+    This validator removes sentences from a string that are similar to
+    other sentences in the string. This is useful for removing
+    repetitive sentences from a string.
 
     **Key Properties**
 
-    | Property                      | Description                       |
-    | ----------------------------- | --------------------------------- |
-    | Name for `format` attribute   | `regex_match`                     |
-    | Supported data types          | `string`                          |
-    | Programmatic fix              | Generate a string that matches the regular expression |
+    | Property                      | Description                         |
+    | ----------------------------- | ----------------------------------- |
+    | Name for `format` attribute   | `remove-redundant-sentences`        |
+    | Supported data types          | `string`                            |
+    | Programmatic fix              | Remove any redundant sentences.     |
 
     Args:
-        regex: Str regex pattern
-        match_type: Str in {"search", "fullmatch"} for a regex search or full-match option
-    """  # noqa
+
+        threshold: The minimum fuzz ratio to be considered redundant.  Defaults to 70.
+    """
 
     def __init__(
-        self,
-        regex: str,
-        match_type: Optional[str] = None,
-        on_fail: Optional[Callable] = None,
+        self, threshold: int = 70, on_fail: Optional[Callable] = None, **kwargs
     ):
-        # todo -> something forces this to be passed as kwargs and therefore xml-ized.
-        # match_types = ["fullmatch", "search"]
-
-        if match_type is None:
-            match_type = "fullmatch"
-        assert match_type in [
-            "fullmatch",
-            "search",
-        ], 'match_type must be in ["fullmatch", "search"]'
-
-        super().__init__(on_fail=on_fail, match_type=match_type, regex=regex)
-        self._regex = regex
-        self._match_type = match_type
+        super().__init__(on_fail, threshold=threshold, **kwargs)
+        self._threshold = threshold
 
     def validate(self, value: Any, metadata: Dict) -> ValidationResult:
-        p = re.compile(self._regex)
-        """Validates that value matches the provided regular expression."""
-        # Pad matching string on either side for fix
-        # example if we are performing a regex search
-        str_padding = (
-            "" if self._match_type == "fullmatch" else rstr.rstr(string.ascii_lowercase)
-        )
-        self._fix_str = str_padding + rstr.xeger(self._regex) + str_padding
+        """Remove redundant sentences from a string."""
 
-        if not getattr(p, self._match_type)(value):
-            return FailResult(
-                error_message=f"Result must match {self._regex}",
-                fix_value=self._fix_str,
+        try:
+            from thefuzz import fuzz  # type: ignore
+        except ImportError:
+            raise ImportError(
+                "`thefuzz` library is required for `remove-redundant-sentences` "
+                "validator. Please install it with `poetry add thefuzz`."
             )
-        return PassResult()
 
-    def to_prompt(self, with_keywords: bool = True) -> str:
-        return "results should match " + self._regex
+        # Split the value into sentences.
+        sentences = sentence_split(value)
+        filtered_sentences = []
+        redundant_sentences = []
+
+        sentence = sentences[0]
+        other_sentences = sentences[1:]
+        while len(other_sentences):
+            # Check fuzzy match against all other sentences
+            filtered_sentences.append(sentence)
+            unique_sentences = []
+            for other_sentence in other_sentences:
+                ratio = fuzz.ratio(sentence, other_sentence)
+                if ratio > self._threshold:
+                    redundant_sentences.append(other_sentence)
+                else:
+                    unique_sentences.append(other_sentence)
+            if len(unique_sentences) == 0:
+                break
+            sentence = unique_sentences[0]
+            other_sentences = unique_sentences[1:]
+
+        filtered_summary = " ".join(filtered_sentences)
+
+        if len(redundant_sentences):
+            redundant_sentences = "\n".join(redundant_sentences)
+            return FailResult(
+                error_message=(
+                    f"The summary \nSummary: {value}\n has sentences\n"
+                    f"{redundant_sentences}\n that are similar to other sentences."
+                ),
+                fix_value=filtered_summary,
+            )
+
+        return PassResult()
