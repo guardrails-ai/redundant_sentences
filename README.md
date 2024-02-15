@@ -19,7 +19,7 @@ This validator removes redundant sentences from an LLM response, resulting in a 
 ## Installation
 
 ```bash
-$ gudardrails hub install hub://guardrails/redundant_sentences
+$ guardrails hub install hub://guardrails/redundant_sentences
 ```
 
 ## Usage Examples
