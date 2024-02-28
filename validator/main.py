@@ -9,8 +9,10 @@ from guardrails.validator_base import (
     register_validator,
 )
 
+from thefuzz import fuzz
 
-@register_validator(name="guardrails/redundant-sentences", data_type="string")
+
+@register_validator(name="guardrails/redundant_sentences", data_type="string")
 class RedundantSentences(Validator):
     """Removes redundant sentences from a string.
 
@@ -22,7 +24,7 @@ class RedundantSentences(Validator):
 
     | Property                      | Description                         |
     | ----------------------------- | ----------------------------------- |
-    | Name for `format` attribute   | `remove-redundant-sentences`        |
+    | Name for `format` attribute   | `guardrails/redundant_sentences`    |
     | Supported data types          | `string`                            |
     | Programmatic fix              | Remove any redundant sentences.     |
 
@@ -40,25 +42,18 @@ class RedundantSentences(Validator):
     def validate(self, value: Any, metadata: Dict) -> ValidationResult:
         """Remove redundant sentences from a string."""
 
-        try:
-            from thefuzz import fuzz  # type: ignore
-        except ImportError:
-            raise ImportError(
-                "`thefuzz` library is required for `remove-redundant-sentences` "
-                "validator. Please install it with `poetry add thefuzz`."
-            )
-
         # Split the value into sentences.
         sentences = sentence_split(value)
         filtered_sentences = []
         redundant_sentences = []
-
         sentence = sentences[0]
         other_sentences = sentences[1:]
+
         while len(other_sentences):
             # Check fuzzy match against all other sentences
             filtered_sentences.append(sentence)
             unique_sentences = []
+
             for other_sentence in other_sentences:
                 ratio = fuzz.ratio(sentence, other_sentence)
                 if ratio > self._threshold:
@@ -67,12 +62,12 @@ class RedundantSentences(Validator):
                     unique_sentences.append(other_sentence)
             if len(unique_sentences) == 0:
                 break
+
             sentence = unique_sentences[0]
             other_sentences = unique_sentences[1:]
-
         filtered_summary = " ".join(filtered_sentences)
 
-        if len(redundant_sentences):
+        if redundant_sentences:
             redundant_sentences = "\n".join(redundant_sentences)
             return FailResult(
                 error_message=(
@@ -81,5 +76,4 @@ class RedundantSentences(Validator):
                 ),
                 fix_value=filtered_summary,
             )
-
         return PassResult()
